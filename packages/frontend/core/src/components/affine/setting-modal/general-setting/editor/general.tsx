@@ -13,20 +13,19 @@ import {
   SettingRow,
   SettingWrapper,
 } from '@affine/component/setting-components';
-import { useAppSettingHelper } from '@affine/core/hooks/affine/use-app-setting-helper';
+import {
+  EditorSettingService,
+  type FontFamily,
+  fontStyleOptions,
+} from '@affine/core/modules/editor-settting';
 import {
   type FontData,
   SystemFontFamilyService,
 } from '@affine/core/modules/system-font-family';
 import { useI18n } from '@affine/i18n';
-import {
-  type AppSetting,
-  type DocMode,
-  type FontFamily,
-  fontStyleOptions,
-  useLiveData,
-  useService,
-} from '@toeverything/infra';
+import { DoneIcon, SearchIcon } from '@blocksuite/icons/rc';
+import { type DocMode, useLiveData, useServices } from '@toeverything/infra';
+import clsx from 'clsx';
 import {
   type ChangeEvent,
   forwardRef,
@@ -35,15 +34,16 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
 } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 
-import { menu, menuTrigger, searchInput, settingWrapper } from './style.css';
+import * as styles from './style.css';
 
 const FontFamilySettings = () => {
   const t = useI18n();
-  const { appSettings, updateSettings } = useAppSettingHelper();
+  const { editorSettingService } = useServices({ EditorSettingService });
+  const settings = useLiveData(editorSettingService.editorSetting.settings$);
+
   const getLabel = useCallback(
     (fontKey: FontFamily) => {
       switch (fontKey) {
@@ -70,8 +70,8 @@ const FontFamilySettings = () => {
         }
         const label = getLabel(key);
         let fontFamily = value;
-        if (key === 'Custom' && appSettings.customFontFamily) {
-          fontFamily = `${appSettings.customFontFamily}, ${value}`;
+        if (key === 'Custom' && settings.customFontFamily) {
+          fontFamily = `${settings.customFontFamily}, ${value}`;
         }
         return {
           value: key,
@@ -83,20 +83,22 @@ const FontFamilySettings = () => {
         } satisfies RadioItem;
       })
       .filter(item => item !== null);
-  }, [appSettings.customFontFamily, getLabel]);
+  }, [getLabel, settings.customFontFamily]);
+
+  const handleFontFamilyChange = useCallback(
+    (value: FontFamily) => {
+      editorSettingService.editorSetting.set('fontFamily', value);
+    },
+    [editorSettingService.editorSetting]
+  );
 
   return (
     <RadioGroup
       items={radioItems}
-      value={appSettings.fontStyle}
+      value={settings.fontFamily}
       width={250}
-      className={settingWrapper}
-      onChange={useCallback(
-        (value: AppSetting['fontStyle']) => {
-          updateSettings('fontStyle', value);
-        },
-        [updateSettings]
-      )}
+      className={styles.settingWrapper}
+      onChange={handleFontFamilyChange}
     />
   );
 };
@@ -120,7 +122,15 @@ const Scroller = forwardRef<
 Scroller.displayName = 'Scroller';
 
 const FontMenuItems = ({ onSelect }: { onSelect: (font: string) => void }) => {
-  const systemFontFamily = useService(SystemFontFamilyService).systemFontFamily;
+  const { systemFontFamilyService, editorSettingService } = useServices({
+    SystemFontFamilyService,
+    EditorSettingService,
+  });
+  const systemFontFamily = systemFontFamilyService.systemFontFamily;
+
+  const currentCustomFont = useLiveData(
+    editorSettingService.editorSetting.settings$
+  ).customFontFamily;
   useEffect(() => {
     if (systemFontFamily.fontList$.value.length === 0) {
       systemFontFamily.loadFontList();
@@ -147,14 +157,17 @@ const FontMenuItems = ({ onSelect }: { onSelect: (font: string) => void }) => {
 
   return (
     <div>
-      <input
-        value={searchText ?? ''}
-        onChange={onInputChange}
-        onKeyDown={onInputKeyDown}
-        autoFocus
-        className={searchInput}
-        placeholder="Type here ..."
-      />
+      <div className={styles.InputContainer}>
+        <SearchIcon className={styles.searchIcon} />
+        <input
+          value={searchText ?? ''}
+          onChange={onInputChange}
+          onKeyDown={onInputKeyDown}
+          autoFocus
+          className={styles.searchInput}
+          placeholder="Fonts"
+        />
+      </div>
       <MenuSeparator />
       {isLoading ? (
         <Loading />
@@ -172,11 +185,12 @@ const FontMenuItems = ({ onSelect }: { onSelect: (font: string) => void }) => {
                     key={result[index].fullName}
                     font={result[index]}
                     onSelect={onSelect}
+                    currentFont={currentCustomFont}
                   />
                 )}
               />
             ) : (
-              <div>No font found</div>
+              <div>No results found.</div>
             )}
           </Scrollable.Viewport>
           <Scrollable.Scrollbar />
@@ -188,9 +202,11 @@ const FontMenuItems = ({ onSelect }: { onSelect: (font: string) => void }) => {
 
 const FontMenuItem = ({
   font,
+  currentFont,
   onSelect,
 }: {
   font: FontData;
+  currentFont: string;
   onSelect: (font: string) => void;
 }) => {
   const handleFontSelect = useCallback(
@@ -198,28 +214,39 @@ const FontMenuItem = ({
     [font, onSelect]
   );
   const fontFamily = getFontFamily(font.family);
+  const selected = currentFont === font.fullName;
+
   return (
-    <MenuItem
-      key={font.fullName}
-      onSelect={handleFontSelect}
-      style={{ fontFamily }}
-    >
-      {font.fullName}
+    <MenuItem key={font.fullName} onSelect={handleFontSelect}>
+      <div className={styles.fontItemContainer}>
+        <div className={styles.fontItem}>
+          <div className={styles.fontLabel} style={{ fontFamily }}>
+            {font.fullName}
+          </div>
+          <div className={clsx(styles.fontLabel, 'secondary')}>
+            {font.fullName}
+          </div>
+        </div>
+
+        {selected && <DoneIcon fontSize={20} className={styles.selectedIcon} />}
+      </div>
     </MenuItem>
   );
 };
 
 const CustomFontFamilySettings = () => {
   const t = useI18n();
-  const { appSettings, updateSettings } = useAppSettingHelper();
-  const fontFamily = getFontFamily(appSettings.customFontFamily);
+  const { editorSettingService } = useServices({ EditorSettingService });
+  const settings = useLiveData(editorSettingService.editorSetting.settings$);
+
+  const fontFamily = getFontFamily(settings.customFontFamily);
   const onCustomFontFamilyChange = useCallback(
     (fontFamily: string) => {
-      updateSettings('customFontFamily', fontFamily);
+      editorSettingService.editorSetting.set('customFontFamily', fontFamily);
     },
-    [updateSettings]
+    [editorSettingService.editorSetting]
   );
-  if (appSettings.fontStyle !== 'Custom' || !environment.isDesktop) {
+  if (settings.fontFamily !== 'Custom' || !environment.isDesktop) {
     return null;
   }
   return (
@@ -238,8 +265,8 @@ const CustomFontFamilySettings = () => {
           style: { width: '250px' },
         }}
       >
-        <MenuTrigger className={menuTrigger} style={{ fontFamily }}>
-          {appSettings.customFontFamily || 'Select a font'}
+        <MenuTrigger className={styles.menuTrigger} style={{ fontFamily }}>
+          {settings.customFontFamily || 'Select a font'}
         </MenuTrigger>
       </Menu>
     </SettingRow>
@@ -247,7 +274,8 @@ const CustomFontFamilySettings = () => {
 };
 const NewDocDefaultModeSettings = () => {
   const t = useI18n();
-  const [value, setValue] = useState<DocMode>('page');
+  const { editorSettingService } = useServices({ EditorSettingService });
+  const settings = useLiveData(editorSettingService.editorSetting.settings$);
   const radioItems = useMemo<RadioItem[]>(
     () => [
       {
@@ -263,13 +291,19 @@ const NewDocDefaultModeSettings = () => {
     ],
     [t]
   );
+  const updateNewDocDefaultMode = useCallback(
+    (value: DocMode) => {
+      editorSettingService.editorSetting.set('newDocDefaultMode', value);
+    },
+    [editorSettingService.editorSetting]
+  );
   return (
     <RadioGroup
       items={radioItems}
-      value={value}
+      value={settings.newDocDefaultMode}
       width={250}
-      className={settingWrapper}
-      onChange={setValue}
+      className={styles.settingWrapper}
+      onChange={updateNewDocDefaultMode}
     />
   );
 };
@@ -293,37 +327,6 @@ export const General = () => {
       <CustomFontFamilySettings />
       <SettingRow
         name={t[
-          'com.affine.settings.editorSettings.general.font-family.title'
-        ]()}
-        desc={t[
-          'com.affine.settings.editorSettings.general.font-family.description'
-        ]()}
-      >
-        <Menu items={<MenuItem>inter</MenuItem>}>
-          <MenuTrigger className={menuTrigger} disabled>
-            inter
-          </MenuTrigger>
-        </Menu>
-      </SettingRow>
-      <SettingRow
-        name={t['com.affine.settings.editorSettings.general.font-size.title']()}
-        desc={t[
-          'com.affine.settings.editorSettings.general.font-size.description'
-        ]()}
-      >
-        <Menu
-          contentOptions={{
-            className: menu,
-          }}
-          items={<MenuItem>15</MenuItem>}
-        >
-          <MenuTrigger className={menuTrigger} disabled>
-            15
-          </MenuTrigger>
-        </Menu>
-      </SettingRow>
-      <SettingRow
-        name={t[
           'com.affine.settings.editorSettings.general.default-new-doc.title'
         ]()}
         desc={t[
@@ -342,11 +345,11 @@ export const General = () => {
       >
         <Menu
           contentOptions={{
-            className: menu,
+            className: styles.menu,
           }}
           items={<MenuItem>Plain Text</MenuItem>}
         >
-          <MenuTrigger className={menuTrigger} disabled>
+          <MenuTrigger className={styles.menuTrigger} disabled>
             Plain Text
           </MenuTrigger>
         </Menu>
